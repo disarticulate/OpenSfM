@@ -101,6 +101,10 @@ def find_best_altitude(
         extrema = DEFAULT_Z
     return extrema
 
+def exif_has_gps(exif):
+    return (
+        "gps" in exif and "latitude" in exif["gps"] and "longitude" in exif["gps"]
+    )
 
 def get_representative_points(
     images: List[str], exifs: Dict[str, Any], reference: geo.TopocentricConverter
@@ -120,9 +124,7 @@ def get_representative_points(
     for image in images:
         exif = exifs[image]
 
-        has_gps = (
-            "gps" in exif and "latitude" in exif["gps"] and "longitude" in exif["gps"]
-        )
+        has_gps = exif_has_gps(exif)
         if not has_gps:
             continue
 
@@ -175,7 +177,7 @@ def match_candidates_by_distance(
         images_cand + images_ref, exifs, reference
     )
 
-    # we don't want to loose some images because of missing GPS :
+    # we don't want to loose some images because of missing GPS (why? There's several pairs matching algos besides this) :
     # either ALL of them or NONE of them are used for getting pairs
     difference = abs(len(representative_points) - len(set(images_cand + images_ref)))
     if difference > 0:
@@ -601,14 +603,15 @@ def match_candidates_from_metadata(
     data.init_reference()
     reference = data.load_reference()
 
-    if not all(map(has_gps_info, exifs.values())):
-        if gps_neighbors != 0:
-            logger.warn(
-                "Not all images have GPS info. " "Disabling matching_gps_neighbors."
-            )
-        gps_neighbors = 0
-        max_distance = 0
-        graph_rounds = 0
+    #Do not degrade pair matching unnecessarily.
+    #if not all(map(has_gps_info, exifs.values())):
+    #    if gps_neighbors != 0:
+    #        logger.warn(
+    #            "Not all images have GPS info. " "Disabling matching_gps_neighbors."
+    #        )
+    #    gps_neighbors = 0
+    #    max_distance = 0
+    #    graph_rounds = 0
 
     images_ref.sort()
 
