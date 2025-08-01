@@ -185,7 +185,9 @@ def match_candidates_by_distance(
             images_cand.remove(k)
             images_ref.remove(k)
 
-    if len(images_cand) <= 0 or images_ref <= 0:
+    # I don't see where images_cand and images_ref arn't being called with the
+    # If we have no GPS, then return empty set.
+    if len(images_cand) <= 0 or len(images_ref) <= 0:
         logger.warning(f"No Candidates have GPS. Returning NO PAirs")
         return set()
 
