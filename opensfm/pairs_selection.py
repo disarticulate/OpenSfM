@@ -173,17 +173,25 @@ def match_candidates_by_distance(
     max_distance = max_distance or 99999999.0
     k = min(len(images_cand), max_neighbors)
 
+    # we don't want to loose some images because of missing GPS
+    # (why? There's several pairs matching algos besides this, they're all being added to the set)
+    # Just "do your job" and provide pairs where GPS is available; ignore the rest. Add a warning
+    # To make sure the user can flag issues as needed. 
+    # either ALL of them or NONE of them are used for getting pairs
+    
+    for k, exif in exifs.items():
+        has_gps = exif_has_gps(exif)
+        if not has_gps:
+            images_cand.remove(k)
+            images_ref.remove(k)
+
+    if len(images_cand) <= 0 or images_ref <= 0:
+        logger.warning(f"No Candidates have GPS. Returning NO PAirs")
+        return set()
+
     representative_points = get_representative_points(
         images_cand + images_ref, exifs, reference
     )
-
-    # we don't want to loose some images because of missing GPS (why? There's several pairs matching algos besides this) :
-    # either ALL of them or NONE of them are used for getting pairs
-    difference = abs(len(representative_points) - len(set(images_cand + images_ref)))
-    if difference > 0:
-        logger.warning(f"Couldn't fetch {difference} images. Returning NO pairs.")
-        return set()
-
     points = np.zeros((len(representative_points), 3))
     for i, point_id in enumerate(images_cand):
         points[i] = representative_points[point_id]
@@ -604,6 +612,9 @@ def match_candidates_from_metadata(
     reference = data.load_reference()
 
     #Do not degrade pair matching unnecessarily.
+    #each algorithm will do it's calcs
+    #If there's still no pairs, _then_ do worst case matches. Matching itself is _expensive_
+    #So finding potential pairs should be more extensive
     #if not all(map(has_gps_info, exifs.values())):
     #    if gps_neighbors != 0:
     #        logger.warn(
@@ -615,57 +626,42 @@ def match_candidates_from_metadata(
 
     images_ref.sort()
 
-    if (
-        max_distance
-        == gps_neighbors
-        == time_neighbors
-        == order_neighbors
-        == bow_neighbors
-        == vlad_neighbors
-        == graph_rounds
-        == 0
-    ):
-        # All pair selection strategies deactivated so we match all pairs
-        d = set()
-        t = set()
-        g = set()
-        o = set()
-        b = set()
-        v = set()
+    # Assume: All match algorithms return empty sets when called with insufficient parameters
+    d = match_candidates_by_distance(
+        images_ref, images_cand, exifs, reference, gps_neighbors, max_distance
+    )
+    g = match_candidates_by_graph(
+        images_ref, images_cand, exifs, reference, graph_rounds
+    )
+    t = match_candidates_by_time(images_ref, images_cand, exifs, time_neighbors)
+    o = match_candidates_by_order(images_ref, images_cand, order_neighbors)
+    b = match_candidates_with_bow(
+        data,
+        images_ref,
+        images_cand,
+        exifs,
+        reference,
+        bow_neighbors,
+        bow_gps_distance,
+        bow_gps_neighbors,
+        bow_other_cameras,
+    )
+    v = match_candidates_with_vlad(
+        data,
+        images_ref,
+        images_cand,
+        exifs,
+        reference,
+        vlad_neighbors,
+        vlad_gps_distance,
+        vlad_gps_neighbors,
+        vlad_other_cameras,
+        {},
+    )
+    pairs = d | g | t | o | set(b) | set(v)
+    # Degrade pairs matching if all else fails.
+    if len(pairs) == 0:
         pairs = {sorted_pair(i, j) for i in images_ref for j in images_cand if i != j}
-    else:
-        d = match_candidates_by_distance(
-            images_ref, images_cand, exifs, reference, gps_neighbors, max_distance
-        )
-        g = match_candidates_by_graph(
-            images_ref, images_cand, exifs, reference, graph_rounds
-        )
-        t = match_candidates_by_time(images_ref, images_cand, exifs, time_neighbors)
-        o = match_candidates_by_order(images_ref, images_cand, order_neighbors)
-        b = match_candidates_with_bow(
-            data,
-            images_ref,
-            images_cand,
-            exifs,
-            reference,
-            bow_neighbors,
-            bow_gps_distance,
-            bow_gps_neighbors,
-            bow_other_cameras,
-        )
-        v = match_candidates_with_vlad(
-            data,
-            images_ref,
-            images_cand,
-            exifs,
-            reference,
-            vlad_neighbors,
-            vlad_gps_distance,
-            vlad_gps_neighbors,
-            vlad_other_cameras,
-            {},
-        )
-        pairs = d | g | t | o | set(b) | set(v)
 
     pairs = ordered_pairs(pairs, images_ref)
 
